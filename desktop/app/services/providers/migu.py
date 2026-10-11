@@ -6,9 +6,11 @@ from urllib.parse import urlencode
 from requests import RequestException
 
 from app.models.music import MusicItem, PlayInfo
+from app.services.errors import ProviderNetworkError
 
 from .base import MusicProvider
 from .http_client import ProviderHttpClient
+from .utils import validate_audio_url
 
 LOGGER = logging.getLogger(__name__)
 REQUEST_TIMEOUT = 15
@@ -154,7 +156,7 @@ class MiguProvider(MusicProvider):
         if not content_id or not copyright_id:
             raise ValueError("Invalid id")
 
-        song = self._find_song(content_id)
+        song = extra.get("song") if extra and isinstance(extra.get("song"), dict) else self._find_song(content_id)
         if not song:
             raise ValueError("Song not found")
 
@@ -163,7 +165,7 @@ class MiguProvider(MusicProvider):
             play_info = self._try_rate(content_id, copyright_id, rate)
             if play_info:
                 return play_info
-        raise ValueError("Failed to get play url")
+        raise ValueError("咪咕未返回可用音频，该歌曲可能暂不可用，请尝试其他歌曲或音源")
 
     def _extract_song_list(self, data: Any) -> list[Any]:
         if not isinstance(data, dict):
@@ -187,6 +189,7 @@ class MiguProvider(MusicProvider):
             album=_join_names(item.get("albums", [])) or None,
             cover=cover,
             provider=self.name,
+            extra={"song": item},
         )
 
     def _find_song(self, content_id: str) -> dict[str, Any] | None:
@@ -199,7 +202,7 @@ class MiguProvider(MusicProvider):
         for item in items:
             if isinstance(item, dict) and item.get("contentId") == content_id:
                 return item
-        return items[0] if items and isinstance(items[0], dict) else None
+        return None
 
     def _get_rate_formats(self, song: dict[str, Any]) -> list[dict[str, Any]]:
         rates = song.get("rateFormats", []) + song.get("newRateFormats", [])
@@ -208,8 +211,9 @@ class MiguProvider(MusicProvider):
             for rate in rates
             if isinstance(rate, dict) and rate.get("formatType") and rate.get("resourceType")
         ]
+        unique_rates = {(str(rate["formatType"]), str(rate["resourceType"])): rate for rate in valid_rates}
         return sorted(
-            valid_rates,
+            unique_rates.values(),
             key=lambda rate: _parse_size(rate.get("size") or rate.get("iosSize") or rate.get("androidSize")),
             reverse=True,
         )
@@ -223,12 +227,15 @@ class MiguProvider(MusicProvider):
                 headers=SEARCH_HEADERS,
                 timeout=REQUEST_TIMEOUT,
             )
-        except RequestException:
-            return None
+        except (ProviderNetworkError, RequestException, ValueError):
+            data = {}
 
         payload = data.get("data", {}) if isinstance(data, dict) else {}
         url = payload.get("url") if isinstance(payload, dict) else None
         if not url:
             url = _fallback_url(content_id, copyright_id, tone_flag, resource_type)
-        fixed_url = str(url).replace("/MP3_128_16_Stero/", "/MP3_320_16_Stero/")
-        return PlayInfo(url=fixed_url, type=MUSIC_QUALITIES.get(tone_flag, "mp3"), bitrate=tone_flag)
+        try:
+            final_url = validate_audio_url(self._http, str(url), timeout=REQUEST_TIMEOUT)
+        except (ProviderNetworkError, RequestException, ValueError):
+            return None
+        return PlayInfo(url=final_url, type=MUSIC_QUALITIES.get(tone_flag, "mp3"), bitrate=tone_flag)

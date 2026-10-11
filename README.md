@@ -137,10 +137,22 @@ docker run -d -p 3000:3000 --name coco-downloader markcxx/coco-downloader:latest
 
 ### 桌面端
 
-```bash
+建议使用 Python 3.12，并为桌面端单独创建虚拟环境。Windows PowerShell：
+
+```powershell
 cd desktop
-pip install -r requirements.txt
-python CoCo-downloader.py
+uv venv .venv --python 3.12
+uv pip install --python .venv/Scripts/python.exe -r requirements-lock.txt
+.\.venv\Scripts\python.exe CoCo-downloader.py
+```
+
+已有上述环境时直接运行启动命令，无需重复创建；`.venv` 是 uv 管理的项目环境目录。
+`requirements.txt` 是直接依赖列表，`requirements-lock.txt` 记录本次 Windows Python 3.12 验证环境。
+
+桌面回归测试（模拟网络响应，不下载第三方音乐）：
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
 如果修改了 `resource.qrc`，需要重新生成 Qt 资源文件：
@@ -151,18 +163,57 @@ python -m PyQt5.pyrcc_main app/resource/resource.qrc -o app/common/resource.py
 
 Windows 打包：
 
-```bash
+```powershell
 cd desktop
-python deploy.py
+.\.venv\Scripts\python.exe deploy.py
+$env:APP_VERSION = '0.0.3'
+& "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" CoCo-downloader.iss
 ```
+
+Windows 编译使用本机 MSVC（Visual Studio C++ Build Tools），默认 4 个编译任务。
+Nuitka 生成 `desktop/build/CoCo-downloader.dist` 后，使用 Inno Setup 6.5 或更高版本编译安装脚本。
+安装工具：`winget install --id JRSoftware.InnoSetup -e --source winget`。
+打开下列 `.iss` 文件并点击 Compile，或使用安装目录中的 `ISCC.exe` 编译。
 
 安装包脚本位于：
 
 ```text
-desktop/CoCo-downloader-setup.iss
+desktop/CoCo-downloader.iss
 ```
 
+安装包输出到 `desktop/dist/`。简体中文语言文件随仓库提供，来源为
+[Inno Setup 6.7.3 官方仓库](https://github.com/jrsoftware/issrc/blob/is-6_7_3/Files/Languages/Unofficial/ChineseSimplified.isl)。
+
 ## 音源说明
+
+### 桌面端渠道实测（2026-10-11）
+
+本次使用“晴天”和“稻香”分别搜索，每个渠道抽取前两条结果，校验音频文件头；
+另对每个有可用音频的渠道至少一首歌曲执行静音 Qt 播放，确认播放进度实际推进。
+这代表测试样本通过，不保证全部歌曲、全部音质或之后的服务可用性。
+
+| 状态 | 渠道 | 实测结果 |
+| --- | --- | --- |
+| 样本通过 | 云音乐、QQ、酷狗、歌曲海、波点、QQMP3、煎饼1–4 | 两个关键词均返回歌曲与有效音频；Qt 实播通过 |
+| 部分可用 | 咪咕 | 两个关键词的 Live 版本可用，原版仍返回服务错误；失败不再当作音频交给播放器 |
+| 未恢复 | 力音 | 官网对“晴天、稻香、周杰伦”均返回空结果，没有可验证的播放样本 |
+
+修复包括：煎饼访客会话初始化、波点主备解析、咪咕音频响应校验和音质回退、QQ 的 MP3 试听策略，以及 QQMP3 试听入口。
+0.0.3 同步修复 Web：歌曲海改用当前搜索入口并保留播放会话，QQMP3 校验音频后自动切换备用接口。
+桌面端使用 QFluentWidgets InfoBar 提示搜索、播放、下载和未捕获 Python 异常；Web 对应显示 Toast。
+两端首页均说明第三方渠道稳定性限制。桌面异常日志位于应用配置目录的 `app.log`。
+QQ 下载仍按高音质优先，试听使用 Qt5 可正常播放的 MP3 流。
+原始结果保存在 `desktop/diagnostics/provider-status-2026-10-11.json`。
+追加桌面复测见 `desktop/diagnostics/provider-followup-2026-10-11.json`；
+Web 实际音频与封面验证见 `desktop/diagnostics/web-provider-status-2026-10-11.json`。
+
+在 `desktop` 目录重新实测（会联网，静音播放片段）：
+
+```powershell
+.\.venv\Scripts\python.exe tools/probe_providers.py --playback
+```
+
+使用 `--query 稻香` 更换关键词，`--only qq bodian` 指定渠道，`--output build/results.json` 指定报告路径。
 
 项目内聚合了多个第三方音乐搜索与解析来源。当前代码中包含的 provider 主要包括：
 

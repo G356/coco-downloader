@@ -285,7 +285,7 @@ class MainWindow(FramelessWindow):
             orient=Qt.Horizontal,
             isClosable=True,
             position=InfoBarPosition.TOP,
-            duration=3000,
+            duration=8000,
             parent=self,
         )
 

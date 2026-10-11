@@ -92,7 +92,7 @@ class QQOfficialProvider(MusicProvider):
             )
         except (ProviderNetworkError, RequestException):
             LOGGER.exception("QQ official search error")
-            return []
+            raise
 
         if not isinstance(data, dict) or data.get("code") != 0:
             LOGGER.warning("QQ official search failed: %s", data)
@@ -237,7 +237,7 @@ class QQOfficialProvider(MusicProvider):
 
     def _resolve_playback_info(self, song_id: str) -> PlayInfo:
         for parser_name, resolver in (
-            ("vkeys", self._get_by_vkeys),
+            ("vkeys", lambda song_id: self._get_by_vkeys(song_id, (8, 6))),
             ("cyapi", self._get_by_cyapi),
             ("xcvts-playback", self._get_by_xcvts_playback),
         ):
@@ -322,8 +322,10 @@ class QQOfficialProvider(MusicProvider):
             cover=cover if isinstance(cover, str) else None,
         )
 
-    def _get_by_vkeys(self, song_id: str) -> PlayInfo:
-        for quality in VKEYS_QUALITY_PRIORITY:
+    def _get_by_vkeys(self, song_id: str, qualities: tuple[int, ...] | None = None) -> PlayInfo:
+        # VKeys 8/6 are 320/128 kbps MP3; prefer these for the Qt5 player.
+        # Downloads retain the existing high-quality-first ordering.
+        for quality in qualities or VKEYS_QUALITY_PRIORITY:
             data = self._http.get_json(
                 VKEYS_URL,
                 headers=SEARCH_HEADERS,

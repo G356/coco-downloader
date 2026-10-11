@@ -22,6 +22,7 @@ from qfluentwidgets import (
 
 from app.services.download_service import DownloadTaskInfo, DownloadTaskStatus
 from app.services.remote_asset import get_remote_asset
+from app.services.thread_lifecycle import retain_thread
 
 DEFAULT_COVER = ":/app/images/play_bar/album_200_200.png"
 COVER_TIMEOUT = 10
@@ -235,9 +236,9 @@ class DownloadTaskCard(CardWidget):
             self.coverLabel.setCover(QPixmap(cover))
             return
 
-        thread = CoverLoadThread(cover, self)
+        thread = CoverLoadThread(cover)
+        retain_thread(thread)
         thread.loaded.connect(self._on_cover_loaded)
-        thread.finished.connect(thread.deleteLater)
         thread.start()
         self.coverThread = thread
 

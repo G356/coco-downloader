@@ -47,6 +47,7 @@ type QQOfficialSearchResponse = {
 };
 
 type QQExtra = {
+  usage?: string;
   selectedParser?: 'vkeys' | 'xcvts' | 'cyapi';
   selectedFormat?: string;
   cover?: string;
@@ -184,7 +185,7 @@ export class QQProvider implements MusicProvider {
         .filter((item) => item.id);
     } catch (error) {
       console.error('QQ search error:', error);
-      return [];
+      throw error;
     }
   }
 
@@ -193,7 +194,7 @@ export class QQProvider implements MusicProvider {
     const selectedParser = payload?.selectedParser;
     try {
       const resolvers = {
-        vkeys: () => this.getByVkeys(id),
+        vkeys: () => this.getByVkeys(id, payload?.usage === 'playback' ? [8, 6] : QUALITY_PRIORITY),
         cyapi: () => this.getByCyapi(id),
         xcvts: () => this.getByXcvts(id),
       };
@@ -246,8 +247,8 @@ export class QQProvider implements MusicProvider {
     };
   }
 
-  private async getByVkeys(id: string): Promise<PlayInfo> {
-    for (const quality of QUALITY_PRIORITY) {
+  private async getByVkeys(id: string, qualities = QUALITY_PRIORITY): Promise<PlayInfo> {
+    for (const quality of qualities) {
       const { data } = await axios.get<VKeysGetUrlResponse>('https://api.vkeys.cn/music/tencent/song/link', {
         headers: SEARCH_HEADERS,
         params: { mid: id, quality },

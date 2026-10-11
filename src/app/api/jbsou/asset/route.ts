@@ -1,7 +1,7 @@
+import { bootstrapJianbinSession } from '@/lib/providers/jianbin-session';
 import axios from 'axios';
 import { NextRequest, NextResponse } from 'next/server';
 
-const BASE_URL = 'https://www.jbsou.cn/';
 const REQUEST_TIMEOUT = 30000;
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36';
@@ -15,14 +15,6 @@ const sessionQueues: Array<Promise<void>> = Array.from(
 );
 let sessionCursor = 0;
 
-function parseSessionCookie(setCookie?: string[] | string) {
-  const values = Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : [];
-  for (const value of values) {
-    const match = value.match(/(?:^|[,;]\s*)PHPSESSID=([^;,\s]+)/i);
-    if (match) return `PHPSESSID=${match[1]}`;
-  }
-  return '';
-}
 
 function parseAssetUrl(value: string | null) {
   if (!value) return null;
@@ -56,13 +48,7 @@ async function requestNewSession() {
   let lastError: unknown;
   for (let attempt = 0; attempt <= SESSION_RETRY_LIMIT; attempt += 1) {
     try {
-      const response = await axios.get(BASE_URL, {
-        headers: { 'user-agent': USER_AGENT },
-        timeout: REQUEST_TIMEOUT,
-      });
-      const cookie = parseSessionCookie(response.headers['set-cookie']);
-      if (!cookie) throw new Error('JBSou did not provide a PHP session');
-      return cookie;
+      return await bootstrapJianbinSession();
     } catch (error) {
       lastError = error;
       if (attempt < SESSION_RETRY_LIMIT) await delay(200 * (attempt + 1));

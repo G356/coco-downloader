@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Navbar } from "@/components/Navbar";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { ErrorNotifications } from "@/components/ErrorNotifications";
 
 export const metadata: Metadata = {
   title: "COCO音乐下载站",
@@ -53,6 +54,7 @@ export default function RootLayout({
             <Navbar />
           </div>
           <div className="min-h-screen">{children}</div>
+          <ErrorNotifications />
         </ThemeProvider>
       </body>
     </html>

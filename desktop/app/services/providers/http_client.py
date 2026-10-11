@@ -1,8 +1,11 @@
 # coding: utf-8
+import socket
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 from requests import exceptions as request_errors
+from urllib3.exceptions import NameResolutionError
 
 from app.services.errors import (
     NETWORK_ERROR_CONNECTION,
@@ -16,6 +19,21 @@ from app.services.errors import (
 )
 
 DEFAULT_TIMEOUT = 15
+
+
+def _is_dns_error(error: BaseException) -> bool:
+    pending = [error]
+    seen = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, (socket.gaierror, NameResolutionError)):
+            return True
+        nested = [current.__cause__, current.__context__, getattr(current, "reason", None), *current.args]
+        pending.extend(value for value in nested if isinstance(value, BaseException))
+    return False
 
 
 class ProviderHttpClient:
@@ -100,6 +118,7 @@ class ProviderHttpClient:
         timeout: int = DEFAULT_TIMEOUT,
         verify: bool = True,
         stream: bool = False,
+        allow_redirects: bool = True,
     ) -> requests.Response:
         return self._request(
             "get",
@@ -109,6 +128,7 @@ class ProviderHttpClient:
             timeout=timeout,
             verify=verify,
             stream=stream,
+            allow_redirects=allow_redirects,
         )
 
     def post_response(
@@ -151,6 +171,11 @@ class ProviderHttpClient:
         except request_errors.SSLError as error:
             raise ProviderNetworkError(NETWORK_ERROR_SSL, "安全连接失败，请稍后重试") from error
         except request_errors.ConnectionError as error:
+            if _is_dns_error(error):
+                host = urlparse(url).hostname or "音乐服务"
+                raise ProviderNetworkError(
+                    NETWORK_ERROR_CONNECTION, f"无法解析音乐服务域名 {host}（DNS 解析失败）"
+                ) from error
             raise ProviderNetworkError(NETWORK_ERROR_CONNECTION, "网络连接失败，请检查网络后重试") from error
         except request_errors.TooManyRedirects as error:
             raise ProviderNetworkError(NETWORK_ERROR_REDIRECT, "请求重定向次数过多，请稍后重试") from error

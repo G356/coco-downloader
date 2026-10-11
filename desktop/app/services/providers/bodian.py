@@ -71,15 +71,15 @@ class BodianProvider(MusicProvider):
     def get_play_info(self, song_id: str, extra: dict[str, Any] | None = None) -> PlayInfo:
         fallback_cover = extra.get("albumPic") if extra and isinstance(extra.get("albumPic"), str) else None
         try:
-            info = self._get_by_cenguigui(song_id)
+            info = self._get_by_tianbao(song_id)
             return PlayInfo(
                 url=info["url"],
                 type=extract_ext(info["url"], "mp3"),
                 bitrate=info.get("bitrate"),
                 cover=info.get("cover") or fallback_cover,
             )
-        except (RequestException, ValueError):
-            info = self._get_by_tianbao(song_id)
+        except (ProviderNetworkError, RequestException, ValueError):
+            info = self._get_by_cenguigui(song_id)
             return PlayInfo(
                 url=info["url"],
                 type=extract_ext(info["url"], "mp3"),

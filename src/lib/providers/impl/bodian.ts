@@ -113,7 +113,7 @@ export class BodianProvider implements MusicProvider {
         .filter((item) => item.id && item.title);
     } catch (error) {
       console.error('Bodian search error:', error);
-      return [];
+      throw error;
     }
   }
 
@@ -121,15 +121,15 @@ export class BodianProvider implements MusicProvider {
     try {
       const fallbackCover = this.extractCover(extra);
       try {
-        const info = await this.getByCenguigui(id);
+        const info = await this.getByTianbao(id);
         return {
           url: info.url,
           type: extractExt(info.url, 'flac'),
-          cover: info.cover || fallbackCover,
+          cover: fallbackCover,
           bitrate: info.bitrate,
         };
       } catch {
-        const info = await this.getByTianbao(id);
+        const info = await this.getByCenguigui(id);
         return {
           url: info.url,
           type: extractExt(info.url, 'flac'),

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import axios from "axios";
 import { Readable } from "stream";
 import { getProvider } from "@/lib/providers";
+import { providerErrorMessage } from "@/lib/api-error";
 
 const DOWNLOAD_TIMEOUT = 30000;
 const RETRY_LIMIT = 2;
@@ -46,7 +47,13 @@ async function requestAudioStream(url: string, attempt = 0) {
     });
 
     if (response.status < 200 || response.status >= 300) {
+      response.data.destroy();
       throw new Error(`Upstream error: ${response.status}`);
+    }
+
+    if (/^(application\/json|text\/)/i.test(String(response.headers['content-type'] || ''))) {
+      response.data.destroy();
+      throw new Error('渠道未返回有效音频，请重试或切换渠道');
     }
 
     const stream = Readable.toWeb(response.data) as ReadableStream<Uint8Array>;
@@ -116,6 +123,6 @@ export async function GET(request: NextRequest) {
 
   } catch (error) {
     console.error("Download error:", error);
-    return NextResponse.json({ error: "Download failed" }, { status: 500 });
+    return NextResponse.json({ error: providerErrorMessage(error) }, { status: 502 });
   }
 }

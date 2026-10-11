@@ -20,10 +20,12 @@ from ..services.errors import (
     ProviderNetworkError,
 )
 from ..services.music_search_service import search_music
+from ..services.thread_lifecycle import retain_thread
+from ..services.providers import PROVIDER_DISPLAY_NAMES
 
 PAGE_SIZE = 20
-PAGED_PLATFORMS = {"cenguigui", "XCVTS", "海棠", "netease", "qq-official", "kugou"}
-DOWNLOAD_ONLY_PLATFORMS = {"QQMP3", "力音", "qqmp3", "livepoo"}
+PAGED_PLATFORMS = {"netease", "qq", "kugou"}
+DOWNLOAD_ONLY_PLATFORMS = {"力音", "livepoo"}
 NETEASE_OFFICIAL_PLATFORMS = {"cenguigui", "netease"}
 
 
@@ -122,7 +124,7 @@ class HomeInterface(ScrollArea):
 
         self._init_widget()
         self._connect_signals()
-        self._sync_preview_hint(self.searchCard.platformComboBox.currentText())
+        self._sync_preview_hint(self.searchCard.platformComboBox.currentData())
 
     def _init_widget(self):
         self.resize(1000, 800)
@@ -179,7 +181,7 @@ class HomeInterface(ScrollArea):
         thread = MusicSearchThread(keyword, platform, request_id, PAGE_SIZE, 0, self)
         thread.searchFinished.connect(self._on_search_finished)
         thread.searchFailed.connect(self._on_search_failed)
-        thread.finished.connect(thread.deleteLater)
+        retain_thread(thread)
         self.searchThread = thread
         thread.start()
 
@@ -203,10 +205,12 @@ class HomeInterface(ScrollArea):
             return
 
         if not items:
+            InfoBar.warning(title=self.tr("暂无结果"), content=self.tr("未找到歌曲，或第三方渠道暂不可用，请更换关键词或渠道。"),
+                            duration=5000, parent=self.window(), position=InfoBarPosition.TOP)
             self._clear_song_list()
             self._show_placeholder(
                 self.tr("没有找到结果"),
-                self.tr("平台 {platform} 没有返回可展示的歌曲").format(platform=platform),
+                self.tr("平台 {platform} 没有返回可展示的歌曲").format(platform=self._platform_name(platform)),
             )
             return
 
@@ -248,7 +252,7 @@ class HomeInterface(ScrollArea):
         self._show_placeholder(
             self.tr("搜索失败"),
             self.tr("{platform} 请求失败：{message}").format(
-                platform=platform,
+                platform=self._platform_name(platform),
                 message=message or self.tr("未知错误"),
             ),
         )
@@ -318,7 +322,7 @@ class HomeInterface(ScrollArea):
         )
         thread.searchFinished.connect(self._on_search_finished)
         thread.searchFailed.connect(self._on_search_failed)
-        thread.finished.connect(thread.deleteLater)
+        retain_thread(thread)
         self.searchThread = thread
         thread.start()
 
@@ -346,6 +350,9 @@ class HomeInterface(ScrollArea):
 
     def _supports_paging(self, platform: str) -> bool:
         return platform in PAGED_PLATFORMS
+
+    def _platform_name(self, platform: str) -> str:
+        return next((name for name, key in PROVIDER_DISPLAY_NAMES.items() if key == platform), platform)
 
     def _on_song_play_requested(self, index: int) -> None:
         if self._is_download_only_platform(self.currentPlatform):

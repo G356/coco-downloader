@@ -4,7 +4,7 @@ from typing import Any
 from PyQt5.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, QSize, QThread, QTimer, Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QPainter, QPixmap
 from PyQt5.QtWidgets import QLabel, QWidget
-from qfluentwidgets import FluentIcon, TransparentToolButton
+from qfluentwidgets import FluentIcon, TransparentToolButton, InfoBar, InfoBarPosition
 from qfluentwidgets.components.widgets.acrylic_label import AcrylicBrush
 
 from app.common.signal_bus import signalBus
@@ -18,6 +18,7 @@ from app.components.play_bar import (
 )
 from app.models.music import LyricData, MusicItem
 from app.services.providers import get_provider
+from app.services.thread_lifecycle import retain_thread
 
 
 class LyricFetchThread(QThread):
@@ -34,9 +35,11 @@ class LyricFetchThread(QThread):
         try:
             provider = get_provider(self.item.provider)
             lyric = provider.get_lyric(self.item.id, dict(self.item.extra))
-            self.finishedWithLyric.emit(self.item, lyric)
+            if not self.isInterruptionRequested():
+                self.finishedWithLyric.emit(self.item, lyric)
         except Exception:
-            self.failed.emit(self.item)
+            if not self.isInterruptionRequested():
+                self.failed.emit(self.item)
 
 
 class PlayingSongPanel(QWidget):
@@ -398,7 +401,7 @@ class PlayingInterface(QWidget):
         thread.finishedWithLyric.connect(self._on_lyric_loaded)
         thread.failed.connect(self._on_lyric_failed)
         thread.finished.connect(lambda: self._clear_lyric_thread(thread))
-        thread.finished.connect(thread.deleteLater)
+        retain_thread(thread)
         self.lyric_thread = thread
         thread.start()
 
@@ -424,6 +427,8 @@ class PlayingInterface(QWidget):
         if self.current_item is None or item.id != self.current_item.id or item.provider != self.current_item.provider:
             return
         self.lyric_widget.set_lyric(None)
+        InfoBar.warning(title=self.tr("歌词加载失败"), content=self.tr("第三方渠道未能提供歌词，不影响歌曲播放。"),
+                        duration=4000, position=InfoBarPosition.TOP, parent=self.window())
 
     def _to_play_bar_song(self, item: MusicItem) -> PlayBarSongInfo:
         return PlayBarSongInfo(

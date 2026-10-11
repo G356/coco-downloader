@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { validateAudioLink } from '@/lib/providers/audio-link';
 import * as cheerio from 'cheerio';
 import { MusicItem, MusicProvider, PlayInfo } from '@/types/music';
 
@@ -163,8 +164,10 @@ export class GequhaiProvider implements MusicProvider {
 
   async search(query: string): Promise<MusicItem[]> {
     try {
-      const url = `https://www.gequhai.com/s/${encodeURIComponent(query)}`;
-      const { data } = await axios.get(url, { headers: SEARCH_HEADERS, timeout: REQUEST_TIMEOUT });
+      const url = 'https://www.gequhai.com/search';
+      const { data } = await axios.get(url, {
+        params: { s: query, page: 1 }, headers: SEARCH_HEADERS, timeout: REQUEST_TIMEOUT,
+      });
       const results = parseSearchHtml(data);
       return results.map((item) => ({
         id: item.id as string,
@@ -177,7 +180,7 @@ export class GequhaiProvider implements MusicProvider {
       }));
     } catch (error) {
       console.error('Gequhai search error:', error);
-      return [];
+      throw error;
     }
   }
 
@@ -189,14 +192,15 @@ export class GequhaiProvider implements MusicProvider {
           ? candidate
           : `https://www.gequhai.com/play/${id}`;
       })();
-      const { data: html } = await axios.get(playUrl, { headers: SEARCH_HEADERS, timeout: REQUEST_TIMEOUT });
+      const { data: html, headers: responseHeaders } = await axios.get(playUrl, { headers: SEARCH_HEADERS, timeout: REQUEST_TIMEOUT });
+      const cookie = (responseHeaders['set-cookie'] || []).map((value: string) => value.split(';')[0]).join('; ');
       const appData = extractAppData(html);
       const playId = String(appData.play_id || appData.mp3_id || id || '');
       let downloadUrl = '';
       if (playId) {
         const params = new URLSearchParams({ id: playId, type: '0' });
         const { data: apiData } = await axios.post('https://www.gequhai.com/api/music', params, {
-          headers: API_HEADERS,
+          headers: { ...API_HEADERS, Cookie: cookie, Referer: playUrl },
           timeout: REQUEST_TIMEOUT,
         });
         const apiUrl = apiData?.data?.url;
@@ -213,9 +217,10 @@ export class GequhaiProvider implements MusicProvider {
       if (!downloadUrl) {
         throw new Error('Failed to resolve download url');
       }
+      const verified = await validateAudioLink(downloadUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
       const cover = typeof appData.mp3_cover === 'string' ? appData.mp3_cover : undefined;
       return {
-        url: downloadUrl,
+        url: verified.url,
         type: extractExt(downloadUrl),
         cover,
       };

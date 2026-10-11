@@ -14,6 +14,7 @@ from app.common.config import DownloadFilenameRule, cfg
 from app.common.signal_bus import signalBus
 from app.models.music import MusicItem, PlayInfo
 from app.services.providers import get_provider
+from app.services.thread_lifecycle import retain_thread
 
 DOWNLOAD_TIMEOUT = 30
 DOWNLOAD_CHUNK_SIZE = 1024 * 256
@@ -136,6 +137,8 @@ class DownloadThread(QThread):
                 extra["cover"] = self.item.cover
 
             play_info = provider.get_play_info(self.item.id, extra)
+            if self.is_canceled:
+                return
             file_path = self._download(play_info)
             if self.is_canceled:
                 return
@@ -169,6 +172,9 @@ class DownloadThread(QThread):
             last_emit_size = 0
             chunks = response.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE)
             first_chunk = next(chunks, b"")
+            content_type = response.headers.get("content-type", "").lower()
+            if not first_chunk or content_type.startswith(("application/json", "text/")):
+                raise ValueError("渠道未返回有效音频，可能已失效，请重试或切换渠道")
             suffix = self._suffix(play_info, first_chunk)
             file_path = self._unique_file_path(download_dir, suffix)
             with file_path.open("wb") as file:
@@ -293,8 +299,6 @@ class DownloadService(QObject):
         for thread, running_task in list(self.threads.items()):
             if running_task.id == task_info.id:
                 thread.cancel()
-                self.threads.pop(thread, None)
-                self._start_next_tasks()
                 return
 
     def _start_next_tasks(self) -> None:
@@ -306,6 +310,7 @@ class DownloadService(QObject):
         task_info.status = DownloadTaskStatus.DOWNLOADING
         signalBus.downloadTaskUpdated.emit(task_info)
         thread = DownloadThread(task_info.item, task_info, task_info.extra_overrides, self)
+        retain_thread(thread)
         self.threads[thread] = task_info
         thread.progressChanged.connect(
             lambda progress, download_thread=thread: self._on_progress(download_thread, progress)
@@ -316,17 +321,12 @@ class DownloadService(QObject):
         thread.downloadFailed.connect(
             lambda message, download_thread=thread: self._on_failed(download_thread, message)
         )
-        thread.downloadFinished.connect(lambda *_: self._remove_thread(thread))
-        thread.downloadFailed.connect(lambda *_: self._remove_thread(thread))
-        thread.downloadFinished.connect(thread.deleteLater)
-        thread.downloadFailed.connect(thread.deleteLater)
         thread.finished.connect(lambda *_: self._remove_thread(thread))
-        thread.finished.connect(thread.deleteLater)
         thread.start()
 
     def _on_progress(self, thread: DownloadThread, progress: DownloadProgressInfo) -> None:
         task_info = self.threads.get(thread)
-        if task_info is None:
+        if task_info is None or thread.is_canceled:
             return
         signalBus.downloadProgressChanged.emit(task_info, progress)
 

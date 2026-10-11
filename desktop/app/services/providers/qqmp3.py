@@ -9,7 +9,7 @@ from app.services.errors import ProviderNetworkError
 
 from .base import MusicProvider
 from .http_client import ProviderHttpClient
-from .utils import extract_ext
+from .utils import extract_ext, validate_audio_url
 
 LOGGER = logging.getLogger(__name__)
 
@@ -61,6 +61,7 @@ class QQMp3Provider(MusicProvider):
                 last_error = error
         if last_error:
             LOGGER.warning("QQMp3 search failed: %s", last_error)
+            raise last_error
         return []
 
     def get_play_info(self, song_id: str, extra: dict[str, Any] | None = None) -> PlayInfo:
@@ -80,6 +81,7 @@ class QQMp3Provider(MusicProvider):
                 if data.get("code") != 200 or not isinstance(url, str) or not url:
                     raise ValueError(str(data.get("msg") or "Failed to get play info"))
                 cover = payload.get("pic") if isinstance(payload.get("pic"), str) else None
+                url = validate_audio_url(self._http, url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
                 return PlayInfo(url=url, type=extract_ext(url), cover=cover)
             except (ProviderNetworkError, RequestException, ValueError) as error:
                 last_error = error

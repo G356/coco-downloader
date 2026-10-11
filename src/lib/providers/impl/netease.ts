@@ -186,7 +186,7 @@ export class NeteaseOfficialProvider implements MusicProvider {
       return songs.map((song) => this.mapItem(song)).filter((item): item is MusicItem => Boolean(item));
     } catch (error) {
       console.error('Netease official search error:', error);
-      return [];
+      throw error;
     }
   }
 

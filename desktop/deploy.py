@@ -49,9 +49,11 @@ def _windows_args() -> list[str]:
     return [
         *NUITKA_COMMAND,
         "--standalone",
-        "--windows-disable-console",
+        "--windows-console-mode=disable",
         "--assume-yes-for-downloads",
-        "--mingw64",
+        "--msvc=latest",
+        "--jobs=4",
+        f"--report={BUILD_DIR / 'compilation-report.xml'}",
         "--plugin-enable=pyqt5",
         f"--include-qt-plugins={QT_PLUGIN_FAMILIES}",
         f"--windows-icon-from-ico={LOGO_ICON}",

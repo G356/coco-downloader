@@ -12,6 +12,7 @@ from Crypto.Util.Padding import pad, unpad
 from requests import RequestException
 
 from app.models.music import LyricData, MusicItem, PlayInfo
+from app.services.errors import ProviderNetworkError
 
 from .base import MusicProvider
 from .http_client import ProviderHttpClient
@@ -124,7 +125,7 @@ class NeteaseOfficialProvider(MusicProvider):
             )
         except (RequestException, ValueError, json.JSONDecodeError):
             LOGGER.exception("Netease official search error")
-            return []
+            raise
 
         result = payload.get("result", {}) if isinstance(payload, dict) else {}
         songs = result.get("songs", []) if isinstance(result, dict) else []
@@ -133,14 +134,20 @@ class NeteaseOfficialProvider(MusicProvider):
         return [item for item in (self._map_item(song) for song in songs) if item]
 
     def get_play_info(self, song_id: str, extra: dict[str, Any] | None = None) -> PlayInfo:
-        level = _normalize_level(extra.get("level") if extra else None)
+        level = _normalize_level((extra.get("level") or extra.get("selectedLevel")) if extra else None)
         fallback_cover = extra.get("cover") if extra and isinstance(extra.get("cover"), str) else None
 
         try:
-            info = self._get_by_cenguigui(song_id, level)
-        except (RequestException, ValueError, json.JSONDecodeError):
-            LOGGER.exception("Netease cenguigui play url error")
             info = self._get_by_meting(song_id, level)
+        except (ProviderNetworkError, RequestException, ValueError) as primary_error:
+            LOGGER.warning("Netease Meting unavailable; trying fallback: %s", primary_error)
+            try:
+                info = self._get_by_cenguigui(song_id, level)
+            except (ProviderNetworkError, RequestException, ValueError) as fallback_error:
+                raise ValueError(
+                    f"云音乐播放链接获取失败：主线路 {primary_error}；"
+                    f"备用线路 {fallback_error}。请稍后重试或切换音源。"
+                ) from fallback_error
 
         return PlayInfo(
             url=info["url"],
@@ -265,8 +272,13 @@ class NeteaseOfficialProvider(MusicProvider):
             METING_API_URL,
             params={"server": "netease", "type": "url", "id": song_id, "br": br},
             timeout=REQUEST_TIMEOUT,
+            allow_redirects=False,
         )
-        url = self._extract_meting_url(response.text)
+        try:
+            url = (response.headers.get("Location", "") if response.status_code == 302
+                   else self._extract_meting_url(response.text))
+        finally:
+            response.close()
         if not is_http_url(url):
             raise ValueError("Invalid meting url")
         return {"url": url, "bitrate": br}

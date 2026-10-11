@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import requests
-from PyQt5.QtCore import QByteArray, QObject, QThread, QUrl, pyqtSignal
+from PyQt5.QtCore import QByteArray, QObject, QThread, QTimer, QUrl, pyqtSignal
 from PyQt5.QtGui import QColor, QPixmap
 from PyQt5.QtMultimedia import QMediaContent, QMediaPlayer
 from PyQt5.QtNetwork import QNetworkRequest
@@ -18,6 +18,7 @@ from app.components.play_bar import PlayBar, PlayBarSongInfo, PlaybackMode
 from app.models.music import MusicItem, PlayInfo
 from app.services.remote_asset import get_remote_asset
 from app.services.providers import get_provider
+from app.services.thread_lifecycle import retain_thread
 
 try:
     from colorthief import ColorThief
@@ -27,6 +28,7 @@ except ImportError:
 DEFAULT_VOLUME = 28
 COVER_TIMEOUT = 12
 MEDIA_TIMEOUT = 45
+PLAYBACK_LOAD_TIMEOUT_MS = 35000
 MEDIA_CHUNK_SIZE = 1024 * 256
 MEDIA_CACHE_DIR = CONFIG_FOLDER / "media_cache"
 LOCAL_PREPARE_PROVIDERS = {"aiting", "livepoo", "qqmp3"}
@@ -80,17 +82,20 @@ class MediaPrepareThread(QThread):
             extra.update(self.extra_overrides)
             if self.item.provider == "netease" and not extra.get("level"):
                 extra["level"] = "exhigh"
-            if self.item.provider in {"qq-official", "kugou"}:
+            if self.item.provider in {"qq", "qq-official", "kugou"}:
                 extra["usage"] = "playback"
             if self.item.cover:
                 extra["cover"] = self.item.cover
             play_info = provider.get_play_info(self.item.id, extra)
+            if self.isInterruptionRequested():
+                return
             play_info = self._prepare_play_info(play_info)
             if self.isInterruptionRequested():
                 return
             self.prepared.emit(self.index, play_info)
         except Exception as error:
-            self.failed.emit(self.index, str(error))
+            if not self.isInterruptionRequested():
+                self.failed.emit(self.index, str(error))
 
     def _prepare_play_info(self, play_info: PlayInfo) -> PlayInfo:
         if not self._should_prepare_local(play_info):
@@ -197,7 +202,7 @@ class CoverThemeThread(QThread):
             if self.isInterruptionRequested():
                 return
             self.loaded.emit(image_bytes, color)
-        except requests.RequestException:
+        except Exception:
             self.failed.emit()
 
     def _extract_color(self, image_bytes: bytes) -> QColor:
@@ -223,6 +228,9 @@ class PlaybackService(QObject):
         self.has_handled_current_error = False
         self.current_media_path = ""
         self.current_cover_url = ""
+        self.load_timer = QTimer(self)
+        self.load_timer.setSingleShot(True)
+        self.load_timer.timeout.connect(self._on_load_timeout)
 
         self._init_player()
         self._connect_signals()
@@ -238,6 +246,10 @@ class PlaybackService(QObject):
         if not 0 <= index < len(self.playlist):
             return
 
+        # Clear the previous media before accepting events for the new request.
+        self.has_handled_current_error = True
+        self.player.stop()
+        self.player.setMedia(QMediaContent())
         self.current_index = index
         self.has_started_current_media = False
         self.has_handled_current_error = False
@@ -245,10 +257,11 @@ class PlaybackService(QObject):
         self.current_cover_url = ""
         item = self.playlist[index]
         self._set_pending_song(item)
+        self.load_timer.start(PLAYBACK_LOAD_TIMEOUT_MS)
         self._resolve_play_info(index, item)
 
     def toggle_play(self) -> None:
-        if self.player.mediaStatus() == QMediaPlayer.NoMedia:
+        if self.has_handled_current_error or self.player.mediaStatus() == QMediaPlayer.NoMedia:
             self.play_index(max(self.current_index, 0))
             return
 
@@ -330,15 +343,16 @@ class PlaybackService(QObject):
             self.resolve_thread.requestInterruption()
 
         thread = MediaPrepareThread(index, item, extra_overrides, self)
+        retain_thread(thread)
         thread.prepared.connect(self._on_media_prepared)
         thread.failed.connect(self._on_play_info_failed)
         thread.finished.connect(self._on_resolve_thread_finished)
-        thread.finished.connect(thread.deleteLater)
         self.resolve_thread = thread
         thread.start()
 
     def _on_media_prepared(self, index: int, play_info: PlayInfo) -> None:
-        if index != self.current_index:
+        if (index != self.current_index or self.has_handled_current_error
+                or (self.sender() is not None and self.sender() is not self.resolve_thread)):
             return
 
         self.current_media_path = play_info.url
@@ -348,8 +362,8 @@ class PlaybackService(QObject):
         self._load_cover(play_info.cover or self.playlist[index].cover or "")
 
     def _on_play_info_failed(self, index: int, message: str) -> None:
-        if index == self.current_index:
-            signalBus.playbackError.emit(message or "获取播放链接失败")
+        if index == self.current_index and (self.sender() is None or self.sender() is self.resolve_thread):
+            self._report_error(message or "获取播放链接失败")
 
     def _load_cover(self, cover_url: str) -> None:
         if not cover_url:
@@ -363,9 +377,9 @@ class PlaybackService(QObject):
             self.cover_thread.requestInterruption()
 
         thread = CoverThemeThread(cover_url, self)
+        retain_thread(thread)
         thread.loaded.connect(self._on_cover_loaded)
         thread.finished.connect(self._on_cover_thread_finished)
-        thread.finished.connect(thread.deleteLater)
         self.cover_thread = thread
         thread.start()
 
@@ -385,16 +399,14 @@ class PlaybackService(QObject):
     def _on_state_changed(self, state: QMediaPlayer.State) -> None:
         if state == QMediaPlayer.PlayingState:
             self.has_started_current_media = True
+            self.load_timer.stop()
         is_playing = state == QMediaPlayer.PlayingState
         self.play_bar.set_playing(is_playing)
         signalBus.playbackStateChanged.emit(is_playing)
 
     def _on_media_status_changed(self, status: QMediaPlayer.MediaStatus) -> None:
         if status == QMediaPlayer.InvalidMedia:
-            if self.has_handled_current_error:
-                return
-            self.has_handled_current_error = True
-            signalBus.playbackError.emit("当前音频无法播放，请尝试下一首")
+            self._report_error(self.player.errorString() or "当前音频无法播放，请重试或切换音源")
             return
         if status == QMediaPlayer.EndOfMedia:
             if not self._is_real_media_end():
@@ -406,12 +418,25 @@ class PlaybackService(QObject):
 
     def _on_player_error(self, error: QMediaPlayer.Error) -> None:
         if error != QMediaPlayer.NoError:
-            if self._should_ignore_remote_resource_error(error):
-                return
-            if self.has_handled_current_error:
-                return
-            self.has_handled_current_error = True
-            signalBus.playbackError.emit(self.player.errorString() or "媒体播放失败")
+            message = self.player.errorString() or "媒体播放失败"
+            if error == QMediaPlayer.ResourceError:
+                message = "无法加载音频，链接可能已失效或网络连接失败。" + message
+            self._report_error(message)
+
+    def _report_error(self, message: str) -> None:
+        if self.has_handled_current_error:
+            return
+        self.has_handled_current_error = True
+        self.load_timer.stop()
+        self.player.stop()
+        self.play_bar.set_playing(False)
+        signalBus.playbackStateChanged.emit(False)
+        signalBus.playbackError.emit(message)
+
+    def _on_load_timeout(self) -> None:
+        if self.resolve_thread is not None and self.resolve_thread.isRunning():
+            self.resolve_thread.requestInterruption()
+        self._report_error("音频加载超时，请重试或切换音源；也请检查网络和代理设置。")
 
     def _on_resolve_thread_finished(self) -> None:
         if self.sender() is self.resolve_thread:
@@ -437,9 +462,6 @@ class PlaybackService(QObject):
         for name, value in play_info.headers.items():
             request.setRawHeader(QByteArray(name.encode("utf-8")), QByteArray(value.encode("utf-8")))
         return QMediaContent(request)
-
-    def _should_ignore_remote_resource_error(self, error: QMediaPlayer.Error) -> bool:
-        return self.current_media_path.startswith("http") and error == QMediaPlayer.ResourceError
 
     def _next_index(self) -> int | None:
         if not self.playlist:

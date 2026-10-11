@@ -9,6 +9,7 @@ from app.models.music import MusicItem, PlayInfo
 
 from .base import MusicProvider
 from .http_client import ProviderHttpClient
+from .jianbin_session import initialize_session
 from .utils import absolute_url, extract_ext, is_http_url, quote_id, safe_json_loads, unquote_repeated
 
 LOGGER = logging.getLogger(__name__)
@@ -56,7 +57,11 @@ class JianbinProvider(MusicProvider):
                     break
         except (ProviderNetworkError, RequestException):
             LOGGER.exception("Jianbin search error")
-            return []
+            raise
+
+        if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+            message = payload.get("error", "响应格式异常") if isinstance(payload, dict) else "响应格式异常"
+            raise ValueError(f"煎饼搜索失败：{message}")
 
         items = payload.get("data", []) if isinstance(payload, dict) else []
         if not isinstance(items, list):
@@ -124,8 +129,4 @@ class JianbinProvider(MusicProvider):
     def _bootstrap_session(self, *, force: bool = False) -> None:
         if force:
             self._http = ProviderHttpClient()
-        self._http.get_text(
-            BASE_URL,
-            headers=PAGE_HEADERS,
-            timeout=REQUEST_TIMEOUT,
-        )
+        initialize_session(self._http._session, PAGE_HEADERS, REQUEST_TIMEOUT)

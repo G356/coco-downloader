@@ -152,7 +152,7 @@ export class KugouProvider implements MusicProvider {
         .filter((item): item is MusicItem => Boolean(item));
     } catch (error) {
       console.error('Kugou search error:', error);
-      return [];
+      throw error;
     }
   }
 

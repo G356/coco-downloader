@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { validateAudioLink } from '@/lib/providers/audio-link';
 import { MusicItem, MusicProvider, PlayInfo } from '@/types/music';
 
 const HEADERS = {
@@ -83,7 +84,7 @@ export class QQMp3Provider implements MusicProvider {
       }
     }
     console.error('QQMp3 search error:', lastError);
-    return [];
+    throw lastError || new Error('QQMP3 搜索服务暂不可用');
   }
 
   async getPlayInfo(id: string, extra?: unknown): Promise<PlayInfo> {
@@ -97,8 +98,9 @@ export class QQMp3Provider implements MusicProvider {
           timeout: 15000,
         });
         if (data.code === 200 && data.data?.url) {
+          const verified = await validateAudioLink(data.data.url);
           return {
-            url: data.data.url,
+            url: verified.url,
             type: extractExt(data.data.url),
             cover: (data.data as { pic?: string }).pic,
           };

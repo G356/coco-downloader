@@ -8,12 +8,10 @@ from .livepoo import LivepooProvider
 from .migu import MiguProvider
 from .netease_official import NeteaseOfficialProvider
 from .qq import QQProvider
-from .qq_official import QQOfficialProvider
 from .qqmp3 import QQMp3Provider
 
 PROVIDERS: dict[str, MusicProvider] = {
     "netease": NeteaseOfficialProvider(),
-    "qq-official": QQOfficialProvider(),
     "kugou": KugouProvider(),
     "gequhai": GequhaiProvider(),
     "bodian": BodianProvider(),
@@ -28,9 +26,9 @@ PROVIDERS: dict[str, MusicProvider] = {
 }
 
 PROVIDER_DISPLAY_NAMES = {
-    "cenguigui": "netease",
-    "XCVTS": "qq-official",
-    "海棠": "kugou",
+    "云音乐": "netease",
+    "QQ音乐（VKeys）": "qq",
+    "酷狗音乐（90svip）": "kugou",
     "歌曲海": "gequhai",
     "波点": "bodian",
     "QQMP3": "qqmp3",
@@ -45,7 +43,11 @@ PROVIDER_DISPLAY_NAMES = {
 
 def get_provider(name: str = "netease") -> MusicProvider:
     provider_key = PROVIDER_DISPLAY_NAMES.get(name, name)
-    return PROVIDERS.get(provider_key) or PROVIDERS["netease"]
+    if provider_key == "qq-official":
+        provider_key = "qq"  # Compatibility with existing playlist items.
+    if provider_key not in PROVIDERS:
+        raise ValueError(f"不支持的音源：{name}")
+    return PROVIDERS[provider_key]
 
 
 def get_all_providers() -> list[MusicProvider]:

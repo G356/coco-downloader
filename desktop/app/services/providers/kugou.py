@@ -86,7 +86,7 @@ class KugouProvider(MusicProvider):
             )
         except ProviderNetworkError:
             LOGGER.exception("Kugou search error")
-            return []
+            raise
 
         payload = data.get("data", {}) if isinstance(data, dict) else {}
         items = payload.get("lists", []) if isinstance(payload, dict) else []

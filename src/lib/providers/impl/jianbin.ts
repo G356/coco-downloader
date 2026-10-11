@@ -1,3 +1,4 @@
+import { bootstrapJianbinSession } from '../jianbin-session';
 import axios from 'axios';
 import { MusicItem, MusicProvider, PlayInfo } from '@/types/music';
 
@@ -15,11 +16,6 @@ const SEARCH_HEADERS = {
   'referer': 'https://www.jbsou.cn/',
 };
 
-const PAGE_HEADERS = {
-  'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-  'accept-language': SEARCH_HEADERS['accept-language'],
-  'user-agent': SEARCH_HEADERS['user-agent'],
-};
 
 type JbsouSearchItem = {
   songid?: string | number;
@@ -63,14 +59,6 @@ function normalizeSearchResponse(payload: unknown): JbsouSearchResponse {
   return payload as JbsouSearchResponse;
 }
 
-function parseSessionCookie(setCookie?: string[] | string) {
-  const values = Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : [];
-  for (const value of values) {
-    const match = value.match(/(?:^|[,;]\s*)PHPSESSID=([^;,\s]+)/i);
-    if (match) return `PHPSESSID=${match[1]}`;
-  }
-  return '';
-}
 
 function isJbsouUrl(value: string) {
   try {
@@ -133,13 +121,7 @@ export class JianbinProvider implements MusicProvider {
   }
 
   private async bootstrapSession() {
-    const response = await axios.get(BASE_URL, {
-      headers: PAGE_HEADERS,
-      timeout: REQUEST_TIMEOUT,
-    });
-    const cookie = parseSessionCookie(response.headers['set-cookie']);
-    if (!cookie) throw new Error('JBSou did not provide a PHP session');
-    return cookie;
+    return bootstrapJianbinSession();
   }
 
   private async requestSearch(query: string, cookie: string) {
@@ -166,7 +148,8 @@ export class JianbinProvider implements MusicProvider {
           break;
         }
       }
-      const list = Array.isArray(payload.data) ? payload.data : [];
+      if (!Array.isArray(payload.data)) throw new Error(payload.error || "煎饼搜索响应异常，请稍后重试");
+      const list = payload.data;
       return list
         .map((item) => {
           const downloadUrl = toAbsoluteUrl(item?.url);
@@ -186,7 +169,7 @@ export class JianbinProvider implements MusicProvider {
         .filter((item) => item.id);
     } catch (error) {
       console.error('Jianbin search error:', error);
-      return [];
+      throw error;
     }
   }
 

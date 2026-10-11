@@ -12,6 +12,19 @@ import { QualitySelectModal } from "@/components/QualitySelectModal";
 import { FullscreenPlayerDrawer } from "@/components/FullscreenPlayerDrawer";
 import { DownloadTask } from "@/types/download";
 import axios from "axios";
+import { message } from "antd";
+
+async function fetchJson(url: string) {
+  const response = await fetch(url, { signal: AbortSignal.timeout(35000) });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || '渠道请求失败，请重试或切换渠道');
+  return data;
+}
+
+function notifyError(error: unknown, fallback: string, key = 'request-error') {
+  const content = error instanceof Error && error.name !== 'TimeoutError' ? error.message : fallback;
+  void message.error({ key, content, duration: 6 });
+}
 
 type QualityOption = {
   value: string;
@@ -149,16 +162,15 @@ const SourceLinkButton = ({ item }: { item: MusicItem }) => {
     
     setLoading(true);
     try {
-      const res = await fetch(buildUrlRequest(item));
-      const data = await res.json();
+      const data = await fetchJson(buildUrlRequest(item));
       if (data.url) {
         window.open(data.url, '_blank');
       } else {
-        alert('无法获取源链接');
+        void message.error(data.error || '无法获取源链接');
       }
     } catch (error) {
       console.error(error);
-      alert('获取链接失败');
+      notifyError(error, '获取链接失败');
     } finally {
       setLoading(false);
     }
@@ -263,8 +275,7 @@ export default function Home() {
       limit: String(SEARCH_PAGE_SIZE),
       offset: String(offset),
     });
-    const res = await fetch(`/api/search?${params.toString()}`);
-    const data = await res.json();
+    const data = await fetchJson(`/api/search?${params.toString()}`);
     const items = Array.isArray(data.items) ? data.items : [];
     setHasMoreResults(items.length === SEARCH_PAGE_SIZE);
     return items as MusicItem[];
@@ -283,8 +294,10 @@ export default function Home() {
     try {
       const items = await fetchSearchPage(0);
       setResults(items);
+      if (!items.length) void message.warning("未找到歌曲，或第三方渠道暂不可用，请更换关键词或渠道");
     } catch (err) {
       console.error(err);
+      notifyError(err, "搜索失败，请重试或切换渠道");
     } finally {
       setLoading(false);
     }
@@ -299,6 +312,7 @@ export default function Home() {
       setResults((prev) => [...prev, ...items]);
     } catch (err) {
       console.error(err);
+      notifyError(err, "搜索失败，请重试或切换渠道");
     } finally {
       setLoadingMore(false);
     }
@@ -320,94 +334,47 @@ export default function Home() {
     }
   };
 
-  const getNextIndexById = (id: string) => {
-    if (playMode === "shuffle") {
-      const order = shuffleOrder.length > 0 ? shuffleOrder : results.map(r => r.id);
-      const orderIndex = order.indexOf(id);
-      if (orderIndex >= 0 && orderIndex < order.length - 1) {
-        const nextId = order[orderIndex + 1];
-        return results.findIndex(r => r.id === nextId);
-      }
-      return -1;
-    }
-    const index = results.findIndex(r => r.id === id);
-    if (index >= 0 && index < results.length - 1) {
-      return index + 1;
-    }
-    return -1;
-  };
-
+  const playRequestRef = useRef(0);
   const handlePlay = async (item: MusicItem) => {
     if (resolvingMusicId === item.id) return;
-    if (activeMusic?.id === item.id) {
-      if (playing) {
-        audioRef.current?.pause();
-        setPlaying(false);
-      } else {
-        audioRef.current?.play();
-        setPlaying(true);
-      }
-      return;
-    }
-
+    const requestId = ++playRequestRef.current;
+    const audio = audioRef.current;
+    if (!audio) return;
     try {
-      if (audioRef.current) {
-        audioRef.current.pause();
+      if (activeMusic?.id === item.id && activeMusic.provider === item.provider && audio.src) {
+        if (playing) { audio.pause(); setPlaying(false); }
+        else { await audio.play(); setPlaying(true); }
+        return;
       }
-      
+      audio.pause();
       setActiveMusic(item);
       syncShuffleIndex(item.id);
-      setPlaying(false); // Wait for load
+      setPlaying(false);
       setCurrentTime(0);
       setResolvingMusicId(item.id);
-
-      const res = await fetch(buildUrlRequest(item));
-      const data = await res.json();
-      
-      if (data.url && audioRef.current) {
-        // 如果返回了封面，更新当前播放歌曲的封面
-        if (data.cover) {
-          setActiveMusic(prev => prev ? { ...prev, cover: data.cover } : item);
-        }
-        
-        audioRef.current.src = data.url;
-        audioRef.current.load();
-        audioRef.current.play()
-          .then(() => {
-            setPlaying(true);
-            setResolvingMusicId(null);
-          })
-          .catch(e => {
-            console.error("Play failed", e);
-            setResolvingMusicId(null);
-            const nextIndex = getNextIndexById(item.id);
-            if (nextIndex >= 0) {
-              handlePlay(results[nextIndex]);
-            } else {
-              setActiveMusic(null);
-              setPlaying(false);
-            }
-          });
-      } else {
-        setResolvingMusicId(null);
-        const nextIndex = getNextIndexById(item.id);
-        if (nextIndex >= 0) {
-          handlePlay(results[nextIndex]);
-        } else {
-          setActiveMusic(null);
-          setPlaying(false);
-        }
-      }
-    } catch (err) {
-      console.error(err);
-      setResolvingMusicId(null);
-      const nextIndex = getNextIndexById(item.id);
-      if (nextIndex >= 0) {
-        handlePlay(results[nextIndex]);
-      } else {
-        setActiveMusic(null);
-        setPlaying(false);
-      }
+      const preview = { ...item, extra: { ...(item.extra as Record<string, unknown> || {}), usage: 'playback' } };
+      const data = await fetchJson(buildUrlRequest(preview));
+      if (requestId !== playRequestRef.current) return;
+      if (!data.url) throw new Error(data.error || '渠道未返回播放链接');
+      if (data.cover) setActiveMusic({ ...item, cover: data.cover });
+      audio.src = data.url;
+      audio.load();
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          audio.play(),
+          new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error('音频加载超时，请重试或切换渠道')), 35000); }),
+        ]);
+      } finally { clearTimeout(timeout); }
+      if (requestId === playRequestRef.current) setPlaying(true);
+    } catch (error) {
+      if (requestId !== playRequestRef.current) return;
+      audio.pause();
+      setActiveMusic(null);
+      setPlaying(false);
+      notifyError(error, '播放失败，请重试或切换渠道', 'playback');
+    } finally {
+      if (requestId === playRequestRef.current) setResolvingMusicId(null);
     }
   };
   handlePlayRef.current = handlePlay;
@@ -464,7 +431,7 @@ export default function Home() {
     }
 
     fetch(`/api/lyric?${params.toString()}`)
-      .then((res) => (res.ok ? res.json() : null))
+      .then(async (res) => { if (!res.ok) throw new Error("歌词加载失败"); return res.json(); })
       .then((data) => {
         if (cancelled) return;
         const lines = Array.isArray(data?.lines) ? data.lines : [];
@@ -478,6 +445,7 @@ export default function Home() {
       .catch((error) => {
         if (!cancelled) {
           console.error("Lyric load failed", error);
+          void message.warning({ key: "lyrics", content: "歌词加载失败，不影响歌曲播放" });
           setLyricLines([]);
         }
       })
@@ -550,7 +518,11 @@ export default function Home() {
 
     } catch (err: unknown) {
       console.error(err);
-      const errorMessage = err instanceof Error ? err.message : 'Download failed';
+      let errorMessage = err instanceof Error ? err.message : '下载失败';
+      if (axios.isAxiosError(err) && err.response?.data instanceof Blob) {
+        try { errorMessage = JSON.parse(await err.response.data.text()).error || errorMessage; } catch { /* Keep the original error. */ }
+      }
+      void message.error({ key: `download-${task.id}`, content: `${task.musicItem.title}：${errorMessage}`, duration: 6 });
       setDownloadTasks(prev => prev.map(t => 
         t.id === task.id ? { ...t, status: 'error', error: errorMessage } : t
       ));
@@ -740,7 +712,7 @@ export default function Home() {
     const handleTimeUpdate = () => setCurrentTime(audio.currentTime);
     const handleLoadedMetadata = () => {
       setDuration(audio.duration);
-      if (playing) audio.play().catch(() => setPlaying(false));
+
     };
     const handleEnded = () => {
       if (playMode === "single") {
@@ -748,7 +720,7 @@ export default function Home() {
           audioRef.current.currentTime = 0;
           audioRef.current.play()
             .then(() => setPlaying(true))
-            .catch(() => setPlaying(false));
+            .catch((error) => { setPlaying(false); notifyError(error, "播放失败", "playback"); });
         }
         return;
       }
@@ -760,11 +732,19 @@ export default function Home() {
       }
     };
 
+    const handleError = () => {
+      setPlaying(false);
+      setResolvingMusicId(null);
+      setActiveMusic(null);
+      void message.error({ key: 'playback', content: '音频无法加载或格式不受支持，请重试或切换渠道', duration: 6 });
+    };
+    audio.addEventListener('error', handleError);
     audio.addEventListener('timeupdate', handleTimeUpdate);
     audio.addEventListener('loadedmetadata', handleLoadedMetadata);
     audio.addEventListener('ended', handleEnded);
 
     return () => {
+      audio.removeEventListener('error', handleError);
       audio.removeEventListener('timeupdate', handleTimeUpdate);
       audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
       audio.removeEventListener('ended', handleEnded);
@@ -788,7 +768,7 @@ export default function Home() {
             COCO音乐下载站
           </h1>
           <p className="mb-8 text-center text-base leading-6 text-[#404752] dark:text-[#c6c6c7]">
-            输入歌曲名、歌手或专辑，选择渠道后开始搜索
+            搜索、播放与下载依赖第三方渠道的稳定性，不保证持续有效；失败时请重试或切换渠道。
           </p>
 
           <form onSubmit={handleSearch} className="w-full max-w-2xl rounded-2xl border border-[#e5e2e1]/70 bg-[#f6f3f2] p-2 shadow-[0_8px_24px_rgba(0,0,0,0.04)] transition-all duration-300 focus-within:border-[#005faa]/30 focus-within:shadow-[0_12px_32px_rgba(0,0,0,0.08)] dark:border-white/10 dark:bg-[#242526]">
@@ -1210,16 +1190,7 @@ export default function Home() {
             currentMusic={activeMusic}
             isPlaying={playing}
             isResolving={resolvingMusicId === activeMusic.id}
-            onPlayPause={() => {
-              if (resolvingMusicId === activeMusic.id) return;
-              if (playing) {
-                audioRef.current?.pause();
-                setPlaying(false);
-              } else {
-                audioRef.current?.play();
-                setPlaying(true);
-              }
-            }}
+            onPlayPause={() => { void handlePlay(activeMusic); }}
             onNext={canNext ? handleNext : undefined}
             onPrev={canPrev ? handlePrev : undefined}
             playMode={playMode}
@@ -1244,16 +1215,7 @@ export default function Home() {
         currentTime={currentTime}
         duration={duration}
         onClose={() => setPlayerDrawerOpen(false)}
-        onPlayPause={() => {
-          if (!activeMusic || resolvingMusicId === activeMusic.id) return;
-          if (playing) {
-            audioRef.current?.pause();
-            setPlaying(false);
-          } else {
-            audioRef.current?.play();
-            setPlaying(true);
-          }
-        }}
+        onPlayPause={() => { if (activeMusic) void handlePlay(activeMusic); }}
         onPrev={canPrev ? handlePrev : undefined}
         onNext={canNext ? handleNext : undefined}
         onSeek={handleSeek}
