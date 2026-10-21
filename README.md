@@ -236,6 +236,16 @@ Web 实际音频与封面验证见 `desktop/diagnostics/web-provider-status-2026
 
 ## 技术栈
 
+### 服务器自动部署
+
+推送 `main` 后，`.github/workflows/docker-push.yml` 构建并发布镜像，再通过 SSH 部署该提交 SHA 对应的镜像。标签推送仅发布镜像。
+GitHub `production` Environment 需配置 `DEPLOY_HOST`、`DEPLOY_PORT`、`DEPLOY_USER`、`DEPLOY_SSH_KEY`、`DEPLOY_KNOWN_HOSTS`。
+服务器部署文件位于 `/home/ubuntu/coco-deploy`，独立 Compose 项目名为 `coco-downloader`，绑定 `127.0.0.1:3004`。
+部署会等待 HTTP 健康检查，失败时恢复旧镜像；首次迁移保留旧容器直到新服务健康。不修改同机博客或反向代理。
+SSH 密钥存放于 GitHub 加密 Secrets，仓库不保存服务器密码或私钥。
+部署密钥使用 `authorized_keys` 的强制命令，只接受 `coco-deploy <40位提交SHA> <GitHub用户名>`，禁止任意 Shell、SCP 和端口转发。
+首次配置及部署脚本更新需由管理员同步 `deploy/` 到上述目录；Actions 只触发该固定脚本。镜像凭据使用临时目录，部署结束自动清理。
+
 ### Web
 
 - Next.js 16
