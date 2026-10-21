@@ -102,7 +102,9 @@ jobs:
         GHCR_USER: ${{ github.actor }}
         IMAGE: ghcr.io/${{ github.repository }}:${{ github.sha }}
       run: |
-        printf '%s' "$GHCR_TOKEN" | ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "coco-deploy ${GITHUB_SHA} ${GHCR_USER}"
+        scp -P "$DEPLOY_PORT" deploy/compose.yaml deploy/deploy.sh "$DEPLOY_USER@$DEPLOY_HOST:/home/ubuntu/coco-deploy/"
+        printf '%s' "$GHCR_TOKEN" | ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "docker login ghcr.io --username '$GHCR_USER' --password-stdin"
+        ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "sh /home/ubuntu/coco-deploy/deploy.sh '$IMAGE'"
 
     - name: Generate summary
       run: |
