@@ -2,11 +2,12 @@ import type { MusicItem, PlayInfo } from '@/types/music';
 import { getProvider } from '@/lib/providers';
 import { getMusicPlatform } from '@/lib/music-channels';
 import { JianbinProvider } from './impl/jianbin';
+import { GDSTUDIO_QUALITY_OPTIONS } from '@/lib/music-quality';
 
 export type SearchSource = 'channel' | 'official';
 export type OfficialTrack = { platform: string; id: string; title: string; artist: string; album?: string };
 const OFFICIAL_PROVIDERS: Record<string, string> = { netease: 'netease', qq: 'qq', kugou: 'kugou', kuwo: 'bodian' };
-const PLATFORM_ID_CHANNELS = new Set(['netease', 'qq', 'kugou', 'bodian', 'at38-netease', 'at38-qq', 'livepoo']);
+const PLATFORM_ID_CHANNELS = new Set(['netease', 'qq', 'kugou', 'bodian', 'at38-netease', 'at38-qq', 'livepoo', 'gdstudio-netease']);
 const normalize = (value: string) => value.normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}]/gu, '');
 const artists = (value: string) => value.split(/\s*(?:\/|、|,|，|&|;|；)\s*/).map(normalize).filter(Boolean);
 
@@ -32,6 +33,7 @@ export async function searchBySource(channel: string, query: string, limit: numb
       // A channel must not receive another resolver's quality/parser options.
       cover: item.cover, filename: `${item.artist}-${item.title}`,
       ...(channel === 'netease' ? (item.extra as object) : {}),
+      ...(channel === 'gdstudio-netease' ? { selectedLevel: 'lossless', qualityOptions: GDSTUDIO_QUALITY_OPTIONS } : {}),
       officialTrack: { platform, id: item.id, title: item.title, artist: item.artist, album: item.album } satisfies OfficialTrack,
     },
   }));

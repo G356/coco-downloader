@@ -113,7 +113,7 @@ function applyQualityChoice(item: MusicItem, value: string) {
     extra.qualityOptions?.find((option) => option.value === value) ||
     extra.qualityOptions?.[0];
   if (!match) return item;
-  if (item.provider === "netease") {
+  if (item.provider === "netease" || item.provider === "gdstudio-netease") {
     return {
       ...item,
       extra: {
