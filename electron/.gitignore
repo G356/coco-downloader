@@ -1,6 +1,0 @@
-node_modules/
-dist/
-release/
-renderer/.next/
-renderer/next-env.d.ts
-*.tsbuildinfo
