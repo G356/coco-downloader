@@ -1,0 +1,77 @@
+.tabs {
+  display: flex;
+  gap: 28px;
+}
+
+.tab {
+  position: relative;
+  padding: 2px 0 9px;
+  border: 0;
+  background: transparent;
+  font-size: 15px;
+  color: var(--text-secondary);
+  transition: color 180ms ease;
+}
+
+.small .tab {
+  font-size: 14px;
+}
+
+.tab:hover {
+  color: var(--text-strong);
+}
+
+.active,
+.active:hover {
+  color: var(--accent-strong);
+}
+
+.indicator {
+  position: absolute;
+  right: 18%;
+  bottom: 0;
+  left: 18%;
+  height: 2.5px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  position: relative;
+  height: 30px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  font-size: 13px;
+  color: var(--text);
+  isolation: isolate;
+  transition: color 180ms ease, background-color 180ms ease;
+}
+
+.chip:hover:not(.chipActive) {
+  background: rgba(155, 135, 191, 0.1);
+}
+
+.chipActive {
+  color: #fff;
+}
+
+.chipPill {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--accent);
+  box-shadow: 0 4px 10px rgba(97, 73, 180, 0.22);
+}
+
+.chipLabel {
+  position: relative;
+}

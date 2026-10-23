@@ -1,0 +1,34 @@
+{
+  "name": "coco-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CoCo Downloader desktop client: Electron shell running a local Next.js renderer",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "predev": "node scripts/ensure-deps.mjs && npm run build:main",
+    "dev": "node scripts/dev.mjs",
+    "predev:renderer": "node scripts/ensure-deps.mjs",
+    "dev:renderer": "next dev renderer --port 3457 --hostname 127.0.0.1",
+    "build:main": "tsc -p tsconfig.json",
+    "build:renderer": "next build renderer && node scripts/copy-standalone-assets.mjs",
+    "prebuild": "node scripts/ensure-deps.mjs",
+    "build": "npm run build:main && npm run build:renderer",
+    "start": "npm run build && electron . --standalone",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p renderer/tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "clsx": "2.1.1",
+    "framer-motion": "12.26.2",
+    "lucide-react": "0.562.0",
+    "next": "16.1.2",
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/react": "19.2.8",
+    "@types/react-dom": "19.2.3",
+    "electron": "45.0.0",
+    "typescript": "5.9.3"
+  }
+}

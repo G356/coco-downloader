@@ -8,8 +8,10 @@ npm-debug.log
 Dockerfile
 docker-compose.yml
 
-# Desktop application (Python/PyQt)
+# Desktop applications (Python/PyQt and Electron)
 desktop/
+electron/
+output/
 
 # Python
 __pycache__/

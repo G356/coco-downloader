@@ -8,7 +8,13 @@
     "start": "next start",
     "lint": "eslint",
     "test": "node --test tests/*.test.cjs",
-    "setup:gdstudio": "node scripts/setup-gdstudio.mjs"
+    "setup:gdstudio": "node scripts/setup-gdstudio.mjs",
+    "desktop:install": "npm --prefix electron ci",
+    "desktop:dev": "npm --prefix electron run dev",
+    "desktop:preview": "npm --prefix electron run dev:renderer",
+    "desktop:build": "npm --prefix electron run build",
+    "desktop:start": "npm --prefix electron start",
+    "desktop:typecheck": "npm --prefix electron run typecheck"
   },
   "dependencies": {
     "antd": "^6.2.0",
